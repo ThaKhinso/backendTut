@@ -15,6 +15,9 @@
     </header>
     <main>
         <form action="/register" method="POST">
+            <% error.forEach(error => { %>
+                <p class="notice"><%= error %></p>
+            <% }) %>
             <fieldset>
                 <legend>Create An Account</legend>
                 <label for="username" ><small>Username</small></label>
