@@ -1,8 +1,11 @@
+// 2:00:51
+
 require("dotenv").config()
 const bcrypt = require("bcrypt")
 const jwt = require("jsonwebtoken")
 const cookieP = require("cookie-parser")
 const express = require("express");
+const sanitize = require("sanitize-html")
 const db = require("better-sqlite3")("OurApp.db")
 db.pragma("journal_mode = WAL")
 
@@ -18,6 +21,19 @@ const createTables = db.transaction(() => {
     )    
     `
     ).run()  
+
+    db.prepare(
+        `
+        CREATE TABLE IF NOT EXISTS posts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        createdDate TEXT,
+        title STRING NOT NULL,
+        body TEXT NOT NULL,
+        authorid INTEGER,
+        FOREIGN KEY (authorid) REFERENCES users (id)
+        )
+        `
+    ).run();
 })
 
 createTables()
@@ -50,11 +66,138 @@ app.use(function (req, res, next) {
 
 
 app.get("/", (req, res) => {
+    if(req.user) {
+        const getPostStatement = db.prepare("SELECT * FROM posts WHERE authorid = ?")
+        const posts = getPostStatement.all(req.user.userid)
+        return res.render("dashboard", {posts})
+    }
+
     res.render("homepage")
 })
 
 app.get("/login", (req,res) => {
     res.render("login")
+})
+
+app.post("/login", (req,res) => {
+    let error = []
+
+    if(typeof req.body.username !== "string") {
+        req.body.username = ""
+    }
+    if(typeof req.body.password !== "string") {
+        req.body.password = ""
+    }    
+
+    if (req.body.username.trim() == "") error = ["Invalid Username / Password"]
+    if (req.body.password == "") error = ["Invalid Username / Password"]
+
+    if(error.length) {
+        return res.render("login", {error})
+    }
+    
+    //res.send("Thank You!!!!!")
+    const userInQuestionStatement = db.prepare("SELECT * FROM users WHERE USERNAME = ?")
+    const userInQuestion = userInQuestionStatement.get(req.body.username)
+
+    if(!userInQuestion) {
+        error = ["Invalid username / password"]
+        return res.render("login", {error})
+    }
+
+    const matchOrNot = bcrypt.compareSync(req.body.password, userInQuestion.password)
+    if(!matchOrNot) {
+        error = ["Invalid username / password"]
+        return res.render("login", {error})
+    }
+
+    // give them a cookie and redirect
+    const ourTokenValue = jwt.sign (
+        {exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24, skyColor: "Blue", userid: userInQuestion.id, username: userInQuestion.username}, 
+        process.env.JWTSECRET
+    )
+
+    res.cookie("ourSimpleApp", ourTokenValue, {
+        httpOnly: true,
+        secure: true,
+        sameSite: "strict",
+        maxAge: 1000 * 60 * 60 * 24
+    })
+
+    res.redirect("/")
+})
+
+let mustBeLoggedIn = (req, res, next) => {
+    if(req.user) {
+        return next()
+    }
+
+    return res.redirect("/")
+}
+
+app.get("/logout", (req,res) => {
+    res.clearCookie("ourSimpleApp")
+    res.redirect("/")
+})
+
+app.get("/create-post", mustBeLoggedIn, (req,res) => {
+    res.render("create-post")
+})
+
+const sharedPostValidation = (req) => {
+    const errors = []
+
+    if(typeof req.body.title !== "string") req.body.title = ""
+    if(typeof req.body.body !== "string") req.body.body = ""
+
+    //trim - sanitize or strip out html
+    req.body.title = sanitize(req.body.title.trim(), {
+        allowedTags: [],
+        allowedAttributes: {},
+    })
+
+    req.body.body = sanitize(req.body.body.trim(), {
+        allowedTags: [],
+        allowedAttributes: {},
+    })
+
+    if(!req.body.title ) errors.push("You must provide a title.")
+    if(!req.body.body ) errors.push("You must provide a title.")
+
+    return errors   
+}
+
+app.get("/post/:id", (req,res) => {
+    const statement = db.prepare("SELECT posts.*, users.username FROM posts INNER JOIN users ON posts.authorid = users.id WHERE posts.id = ?")
+    const post = statement.get(req.params.id)
+    if(!post) {
+        return res.redirect("/")
+    }
+    res.render("single-post", {post})
+
+})
+
+app.get("/test", (req,res) => {
+    res.render("test")
+})
+
+app.post("/create-post", mustBeLoggedIn, (req,res) => {
+    const errors = sharedPostValidation(req);
+
+    if(errors.length) {
+        return res.render("create-post", {errors})
+    }
+
+    // save it to database
+    const ourStatement = db.prepare("INSERT INTO posts (title, body, authorid, createdDate) VALUES (?, ?, ?, ?) ")
+    const result = ourStatement.run(req.body.title, req.body.body, req.user.userid, new Date().toISOString())
+
+    const getPostStatement = db.prepare("SELECT * FROM posts WHERE ROWID = ?")
+    const realPost = getPostStatement.get(result.lastInsertRowid)
+
+
+
+    res.redirect(`/post/${realPost.id}`)
 })
 
 app.post("/register", (req, res) => {
@@ -73,6 +216,13 @@ app.post("/register", (req, res) => {
     if(req.body.username && req.body.username.length < 3) error.push("Username must have at least three characters")
     if(req.body.username && req.body.username.length > 10) error.push("Username should not longer than three characters")
     if(req.body.username && !req.body.username.match(/^[a-zA-Z0-9]+$/)) error.push("Username can contain only letters or numbers")
+
+    // check if username exist already
+    const usernameStatement = db.prepare("SELECT * FROM users WHERE username = ?")
+    const usernameCheck = usernameStatement.get(req.body.username)
+    if(usernameCheck){
+        error.push("That username is already taken")
+    }
 
     if(!req.body.password) error.push("You must provide a password")
     if(req.body.password && req.body.password.length < 8) error.push("Password must have at least 八 characters")
@@ -99,7 +249,8 @@ app.post("/register", (req, res) => {
         sameSite: "strict",
         maxAge: 1000 * 60 * 60 * 24
     })
-    res.send("Thank you!")
+    res.redirect("/")
 })
+
 
 app.listen(3000)
