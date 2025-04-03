@@ -96,7 +96,6 @@ app.post("/login", (req,res) => {
         return res.render("login", {error})
     }
     
-    //res.send("Thank You!!!!!")
     const userInQuestionStatement = db.prepare("SELECT * FROM users WHERE USERNAME = ?")
     const userInQuestion = userInQuestionStatement.get(req.body.username)
 
@@ -166,6 +165,57 @@ const sharedPostValidation = (req) => {
 
     return errors   
 }
+
+app.get("/edit-post/:id", mustBeLoggedIn, (req,res) => {
+    // try to look up the post in question
+    const statement = db.prepare("SELECT * FROM posts WHERE id = ?")
+    const post = statement.get(req.params.id)
+
+    if(!post) res.redirect("/")
+    // if you're not the author, redirect to homepage
+    if(post.authorid !== req.user.userid) {
+        return res.redirect("/")
+    }
+    // otherwise render the edit post template
+    res.render("edit-post", {post})
+})
+
+app.post("/edit-post/:id", mustBeLoggedIn, (req, res) => {
+    const statement = db.prepare("SELECT * FROM posts WHERE id = ?")
+    const post = statement.get(req.params.id)
+
+    if(!post) res.redirect("/")
+    // if you're not the author, redirect to homepage
+    if(post.authorid !== req.user.userid) {
+        return res.redirect("/")
+    }
+
+    const errrors = sharedPostValidation(req)
+    if(errrors.length) {
+        return res.render("edit-post", {errrors})
+    }
+
+    const updateStatement = db.prepare("UPDATE posts SET title = ?, body = ? WHERE id = ?")
+    updateStatement.run(req.body.title, req.body.body, req.params.id)
+
+    return res.redirect(`/post/${req.params.id}`)
+})
+
+app.post("/delete-post/:id", mustBeLoggedIn, (req, res) => {
+    const statement = db.prepare("SELECT * FROM posts WHERE id = ?")
+    const post = statement.get(req.params.id)
+
+    if(!post) res.redirect("/")
+    // if you're not the author, redirect to homepage
+    if(post.authorid !== req.user.userid) {
+        return res.redirect("/")
+    }
+
+    const deleteStatement = db.prepare("DELETE FROM posts WHERE id = ?")
+    deleteStatement.run(req.params.id)
+
+    res.redirect("/")
+})
 
 app.get("/post/:id", (req,res) => {
     const statement = db.prepare("SELECT posts.*, users.username FROM posts INNER JOIN users ON posts.authorid = users.id WHERE posts.id = ?")

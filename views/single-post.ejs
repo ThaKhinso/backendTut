@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Document</title>
     <link rel="stylesheet" href="styles.css">
-</head>    
+</head>
 <body>
     <%- include('includes/header.ejs') %>
 
@@ -21,7 +21,10 @@
             </div>
         </article>
 
-        <a href="#">Edit Post</a>
+        <a href="/edit-post/<%= post.id %>" class="button">Edit Post</a>
+        <form style="display: inline;" action="/delete-post/<%= post.id %>" method="post">
+            <button>Delete Post</button>
+        </form>
     </main>
 
     <%- include('includes/footer.ejs') %>
